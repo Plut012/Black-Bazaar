@@ -1,1 +1,55 @@
-lol
+themes:
+	- art nouveau
+	- art deco
+	- dune vibe -- abstract nature
+	- 
+
+Focus:
+	- card creation
+		- deck building
+		- llm shopkeep / card creator
+		-- entering tourney, card checker ensures your not "cheating" **
+		- recruitment cost -- ml + llm
+			- interesting "costs"
+faction creation:
+	- theme
+	- win cons
+	- costs / "mana"
+
+mechanics:
+	- sacrafice to summon
+		- yu gi oh 
+		- inscryption
+		- lorcana
+
+	- gameplay format:
+		- mtg
+		- lorcana
+		- inscrypt
+		- gwent
+			(i think gwent format is very nice because: its quick, round reduce unfairness, no mana cost - only recruitment)
+
+		- runeterra
+		- yu gi oh
+			- vampire politic game
+
+
+
+MongoDB:
+	- cards as json
+		- rag w/ llm
+	- store created cards
+		- art
+		- stats / abilities
+
+leaderboard:
+	- track & auto balance
+
+
+GOAL: Player creates faction, win cons, & cards
+
+CHALLENGE: How to have structure, when anything can be created.
+
+	- enable freedom within structure - 
+
+
