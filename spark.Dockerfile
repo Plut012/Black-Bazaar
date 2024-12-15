@@ -27,5 +27,25 @@ RUN pg_ctlcluster 12 main start && \
 
 EXPOSE 5432
 
+# RUN service postgresql start
+
 # RUN php postgres/bin/database 1
+# RUN php bin/database =>1
+
+# sudo service postgresql start      
+# sudo service mysql start            
+
+# su -c "psql -c 'CREATE DATABASE gwent;'" postgres
+
+sudo -u postgres psql
+CREATE DATABASE gwent;
+\q
+
+sudo mysql -u root -p
+CREATE DATABASE gwent;
+
+
+CREATE USER wizard WITH PASSWORD 'gun';
+GRANT ALL PRIVILEGES ON DATABASE gwent TO wizard;
+
 
