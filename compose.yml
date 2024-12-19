@@ -1,0 +1,5 @@
+services:
+  bazaar:
+    build:
+      context: .
+      dockerfile: spark.Dockerfile

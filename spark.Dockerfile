@@ -1,51 +1,38 @@
 FROM ubuntu:22.04
 
-ENV PYTHON_VERSION=3.12
-ENV USER_EXEC=wizard
-ENV USER_EXEC_ID=oooo
-ENV USER_EXEC_GROUP=root
-ENV USER_EXEC_GROUP_ID=0
-ENV VIRTUAL_ENV=.venv
-
-# Update and upgrade packages
+# Update and upgrade packages with DEBCONF_NONINTERACTIVE set for automated time zone selection
+#RUN DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE=YES env LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 /usr/bin/debconf-set -t debconf/templets --database templet
+#systemchooser=0 Europe,systemchooser=globe/Europe,systemchooser=fixedchoice/European
 RUN apt-get update && apt-get upgrade -y
+RUN rm -rf /etc/localtime && ln -s /usr/share/zoneinfo/Europe/Amsterdam /etc/localtime 
 
-# Install necessary software
-RUN apt-get install -y software-properties-common python$PYTHON_VERSION python3-pip python${PYTHON_VERSION}-venv git postgresql postgresql-contrib php
+# Install necessary software (using more general python3 package version)
+RUN apt-get install -y software-properties-common git postgresql postgresql-contrib php libapache2-mod-php
 
 # Create user
-RUN useradd --uid $USER_EXEC_ID --gid $USER_EXEC_GROUP_ID --create-home $USER_EXEC
+RUN groupadd --gid 1000 usergroup && useradd --uid 1001 --gid 1000 userexec
+
+# Set environment variables
+ENV VIRTUAL_ENV=.venv
 
 # Clone repository
 WORKDIR /postgres
 RUN git clone https://github.com/teddybee-r/GwentOneDB.git
 
-# Start PostgreSQL service and create user
-RUN pg_ctlcluster 12 main start && \
-    /usr/lib/postgresql/12/bin/createuser --superuser myuser && \
-    /usr/lib/postgresql/12/bin/createextension hstore
+#RUN su -c "pg_ctlcluster 12 main start" \
+#    - postgres \
+#&& createuser --superuser wizard && \
+#    psql -d gwent -c "CREATE EXTENSION IF NOT EXISTS hstore;"
 
-EXPOSE 5432
+# Start PostgreSQL service and create database/user
+#RUN pg_ctlcluster 12 main start && \
+#    /usr/lib/postgresql/12/bin/createuser --superuser wizard && \
+#    /usr/lib/postgresql/12/bin/createextension hstore
 
-# RUN service postgresql start
+#EXPOSE 5432
 
-# RUN php postgres/bin/database 1
-# RUN php bin/database =>1
+CMD ["sleep", "3600"]
 
-# sudo service postgresql start      
-# sudo service mysql start            
-
-# su -c "psql -c 'CREATE DATABASE gwent;'" postgres
-
-sudo -u postgres psql
-CREATE DATABASE gwent;
-\q
-
-sudo mysql -u root -p
-CREATE DATABASE gwent;
-
-
-CREATE USER wizard WITH PASSWORD 'gun';
-GRANT ALL PRIVILEGES ON DATABASE gwent TO wizard;
-
-
+# Run PHP script to insert data into PostgreSQL
+#WORKDIR /postgres/GwentOneDB
+#RUN php bin/database 
