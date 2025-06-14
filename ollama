@@ -1,0 +1,409 @@
+#!/usr/bin/env python3
+"""
+AI Card Trader - FastAPI Backend
+Integrates Ollama LLM with Qdrant vector database for MTG card trading
+"""
+
+import os
+import asyncio
+import uuid
+from typing import List, Optional, Dict, Any
+from datetime import datetime
+
+import httpx
+import pandas as pd
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams, PointStruct
+from sentence_transformers import SentenceTransformer
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Configuration
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
+QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
+MODEL_NAME = os.getenv("MODEL_NAME", "llama2")
+
+# Initialize components
+app = FastAPI(title="AI Card Trader", description="Trade cards with an AI shopkeeper")
+qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+embedding_model = SentenceTransformer('all-MiniLM-L6-v2')  # 384 dimensions
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Pydantic models
+class ChatMessage(BaseModel):
+    message: str
+    card_context: Optional[str] = ""
+
+class ChatResponse(BaseModel):
+    response: str
+    timestamp: str
+
+class MTGCard(BaseModel):
+    id: str
+    name: str
+    mana_cost: str
+    cmc: int
+    type_line: str
+    oracle_text: Optional[str] = ""
+    power: Optional[str] = None
+    toughness: Optional[str] = None
+    colors: List[str] = []
+    color_identity: List[str] = []
+    rarity: str
+    set_name: str
+    artist: str
+    flavor_text: Optional[str] = ""
+    image_uri: Optional[str] = ""
+    trade_value: float = 0.0
+    shopkeeper_notes: Optional[str] = ""
+
+class CardSearch(BaseModel):
+    query: str
+    limit: int = 10
+
+class CardShopkeeper:
+    """AI Shopkeeper powered by Ollama"""
+    
+    def __init__(self, ollama_host: str, model_name: str):
+        self.ollama_host = ollama_host
+        self.model_name = model_name
+        self.personality = """You are Grimjaw, an ancient and cunning card shopkeeper in a mystical trading post. 
+        You've been collecting and trading magical cards for centuries. You speak with wisdom but also shrewd business sense.
+        You evaluate cards based on their rarity, power, and your current inventory needs. 
+        You sometimes tell brief stories about the cards' origins or previous owners.
+        Keep responses concise but flavorful (2-3 sentences max). Always end with a specific trade offer, question, or action.
+        Use fantasy/medieval language but keep it accessible. Show personality - be slightly greedy but fair."""
+
+    async def generate_response(self, user_message: str, card_context: str = "") -> str:
+        """Generate AI response using Ollama"""
+        try:
+            prompt = f"""{self.personality}
+
+Current cards being discussed: {card_context}
+Customer says: "{user_message}"
+
+Respond as Grimjaw (keep it brief and engaging):"""
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.ollama_host}/api/generate",
+                    json={
+                        "model": self.model_name,
+                        "prompt": prompt,
+                        "stream": False,
+                        "options": {
+                            "temperature": 0.8,
+                            "max_tokens": 150,
+                            "top_p": 0.9
+                        }
+                    }
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    return result.get("response", "The mystical energies are disrupted...")
+                else:
+                    return "My crystal ball is cloudy today... *coughs* ...perhaps try again, traveler."
+                    
+        except Exception as e:
+            print(f"Ollama error: {e}")
+            return "The ancient magics seem to be fluctuating... Give me a moment to realign the cosmic forces."
+
+# Initialize shopkeeper
+shopkeeper = CardShopkeeper(OLLAMA_HOST, MODEL_NAME)
+
+class CardDatabase:
+    """Manages MTG cards in Qdrant vector database"""
+    
+    def __init__(self, client: QdrantClient, embedding_model: SentenceTransformer):
+        self.client = client
+        self.embedding_model = embedding_model
+        self.collection_name = "mtg_cards"
+    
+    async def setup_collection(self):
+        """Initialize Qdrant collection"""
+        try:
+            # Check if collection exists
+            collections = self.client.get_collections()
+            if any(col.name == self.collection_name for col in collections.collections):
+                print(f"Collection '{self.collection_name}' already exists")
+                return
+            
+            # Create collection
+            self.client.create_collection(
+                collection_name=self.collection_name,
+                vectors_config=VectorParams(size=384, distance=Distance.COSINE),
+            )
+            
+            # Create payload indexes
+            self.client.create_payload_index(
+                collection_name=self.collection_name,
+                field_name="name",
+                field_schema="text"
+            )
+            self.client.create_payload_index(
+                collection_name=self.collection_name,
+                field_name="rarity",
+                field_schema="keyword"
+            )
+            print(f"Created collection '{self.collection_name}' with indexes")
+            
+        except Exception as e:
+            print(f"Error setting up collection: {e}")
+    
+    def get_sample_cards(self) -> List[Dict]:
+        """Sample MTG cards for seeding"""
+        return [
+            {
+                "name": "Lightning Bolt",
+                "mana_cost": "{R}",
+                "cmc": 1,
+                "type_line": "Instant",
+                "oracle_text": "Lightning Bolt deals 3 damage to any target.",
+                "colors": ["R"],
+                "color_identity": ["R"],
+                "rarity": "common",
+                "set_name": "Limited Edition Alpha",
+                "artist": "Christopher Rush",
+                "flavor_text": "The sparkmage shrieked, calling on the rage of the storms of his youth.",
+                "image_uri": "https://cards.scryfall.io/normal/front/c/e/ce711943-c1a1-43a0-8b89-8d169cfb8e06.jpg"
+            },
+            {
+                "name": "Black Lotus",
+                "mana_cost": "{0}",
+                "cmc": 0,
+                "type_line": "Artifact",
+                "oracle_text": "{T}, Sacrifice Black Lotus: Add three mana of any one color.",
+                "colors": [],
+                "color_identity": [],
+                "rarity": "rare",
+                "set_name": "Limited Edition Alpha",
+                "artist": "Christopher Rush",
+                "flavor_text": "",
+                "image_uri": "https://cards.scryfall.io/normal/front/b/d/bd8fa327-dd41-4737-8f19-2cf5eb1f7cdd.jpg"
+            },
+            {
+                "name": "Serra Angel",
+                "mana_cost": "{3}{W}{W}",
+                "cmc": 5,
+                "type_line": "Creature — Angel",
+                "oracle_text": "Flying, vigilance",
+                "power": "4",
+                "toughness": "4",
+                "colors": ["W"],
+                "color_identity": ["W"],
+                "rarity": "uncommon",
+                "set_name": "Limited Edition Alpha",
+                "artist": "Douglas Shuler",
+                "flavor_text": "Born with wings of light and a sword of faith, this heavenly incarnation embodies the best of humanity.",
+                "image_uri": "https://cards.scryfall.io/normal/front/9/0/9067f035-3437-4c5c-bae9-d3c9001a3411.jpg"
+            },
+            {
+                "name": "Counterspell",
+                "mana_cost": "{U}{U}",
+                "cmc": 2,
+                "type_line": "Instant",
+                "oracle_text": "Counter target spell.",
+                "colors": ["U"],
+                "color_identity": ["U"],
+                "rarity": "common",
+                "set_name": "Limited Edition Alpha",
+                "artist": "Mark Poole",
+                "flavor_text": "What is the sound of one hand clapping?",
+                "image_uri": "https://cards.scryfall.io/normal/front/a/4/a4775479-b4a8-4c8a-8e2b-4d78571a74c3.jpg"
+            },
+            {
+                "name": "Shivan Dragon",
+                "mana_cost": "{4}{R}{R}",
+                "cmc": 6,
+                "type_line": "Creature — Dragon",
+                "oracle_text": "Flying\n{R}: Shivan Dragon gets +1/+0 until end of turn.",
+                "power": "5",
+                "toughness": "5",
+                "colors": ["R"],
+                "color_identity": ["R"],
+                "rarity": "rare",
+                "set_name": "Limited Edition Alpha",
+                "artist": "Melissa A. Benson",
+                "flavor_text": "While dragons are fierce, it's their intelligence that makes them truly dangerous.",
+                "image_uri": "https://cards.scryfall.io/normal/front/f/9/f9a8a9ce-4c9b-4be6-9234-99c3e9b1c60d.jpg"
+            }
+        ]
+    
+    def calculate_trade_value(self, card: Dict) -> float:
+        """Calculate card trade value"""
+        rarity_values = {"common": 1, "uncommon": 3, "rare": 10, "mythic": 25}
+        base_value = rarity_values.get(card["rarity"], 1)
+        
+        # Special cases
+        if card["name"] == "Black Lotus":
+            base_value *= 100
+        elif card["cmc"] == 0:
+            base_value *= 2
+            
+        return float(base_value)
+    
+    def generate_shopkeeper_notes(self, card: Dict) -> str:
+        """Generate flavor text for shopkeeper"""
+        notes = [
+            f"Ah, {card['name']}... I remember when this first crossed my counter.",
+            f"{card['name']} - always in demand among the adventurers.",
+            f"This {card['name']} has seen many battles, but still holds its power.",
+            f"Few understand the true worth of {card['name']} like I do.",
+            f"{card['name']}... now there's a card with a story to tell."
+        ]
+        return notes[hash(card["name"]) % len(notes)]
+    
+    async def seed_cards(self):
+        """Seed database with sample cards"""
+        try:
+            cards = self.get_sample_cards()
+            points = []
+            
+            for card in cards:
+                # Generate embedding
+                text = f"{card['name']} {card['type_line']} {card.get('oracle_text', '')} {card.get('flavor_text', '')}"
+                embedding = self.embedding_model.encode(text).tolist()
+                
+                # Enhance card data
+                card["trade_value"] = self.calculate_trade_value(card)
+                card["shopkeeper_notes"] = self.generate_shopkeeper_notes(card)
+                
+                points.append(PointStruct(
+                    id=str(uuid.uuid4()),
+                    vector=embedding,
+                    payload=card
+                ))
+            
+            self.client.upsert(
+                collection_name=self.collection_name,
+                points=points,
+                wait=True
+            )
+            
+            print(f"Seeded {len(points)} cards successfully")
+            
+        except Exception as e:
+            print(f"Error seeding cards: {e}")
+    
+    async def search_cards(self, query: str, limit: int = 10) -> List[MTGCard]:
+        """Search cards by text similarity"""
+        try:
+            query_embedding = self.embedding_model.encode(query).tolist()
+            
+            results = self.client.search(
+                collection_name=self.collection_name,
+                query_vector=query_embedding,
+                limit=limit,
+                with_payload=True
+            )
+            
+            cards = []
+            for result in results:
+                card_data = result.payload
+                card_data["id"] = str(result.id)
+                cards.append(MTGCard(**card_data))
+            
+            return cards
+            
+        except Exception as e:
+            print(f"Error searching cards: {e}")
+            return []
+    
+    async def get_random_cards(self, count: int = 5) -> List[MTGCard]:
+        """Get random cards from inventory"""
+        try:
+            results = self.client.scroll(
+                collection_name=self.collection_name,
+                limit=count,
+                with_payload=True
+            )
+            
+            cards = []
+            for result in results[0]:
+                card_data = result.payload
+                card_data["id"] = str(result.id)
+                cards.append(MTGCard(**card_data))
+            
+            return cards
+            
+        except Exception as e:
+            print(f"Error getting random cards: {e}")
+            return []
+
+# Initialize database
+card_db = CardDatabase(qdrant_client, embedding_model)
+
+# API Routes
+@app.on_event("startup")
+async def startup():
+    """Initialize database on startup"""
+    await card_db.setup_collection()
+    await card_db.seed_cards()
+
+@app.get("/")
+async def root():
+    return {"message": "Welcome to Grimjaw's Card Emporium", "status": "ready"}
+
+@app.get("/api/health")
+async def health_check():
+    return {"status": "OK", "message": "Card Trader API is running"}
+
+@app.get("/api/cards/random/{count}")
+async def get_random_cards(count: int = 5):
+    """Get random cards from inventory"""
+    cards = await card_db.get_random_cards(count)
+    return {"cards": cards}
+
+@app.post("/api/cards/search")
+async def search_cards(search: CardSearch):
+    """Search cards by text similarity"""
+    cards = await card_db.search_cards(search.query, search.limit)
+    return {"cards": cards}
+
+@app.post("/api/chat")
+async def chat_with_shopkeeper(message: ChatMessage) -> ChatResponse:
+    """Chat with the AI shopkeeper"""
+    response = await shopkeeper.generate_response(message.message, message.card_context)
+    return ChatResponse(
+        response=response,
+        timestamp=datetime.now().isoformat()
+    )
+
+@app.get("/api/cards/{card_id}")
+async def get_card(card_id: str):
+    """Get specific card details"""
+    try:
+        result = qdrant_client.retrieve(
+            collection_name="mtg_cards",
+            ids=[card_id],
+            with_payload=True
+        )
+        
+        if not result:
+            raise HTTPException(status_code=404, detail="Card not found")
+        
+        card_data = result[0].payload
+        card_data["id"] = str(result[0].id)
+        return MTGCard(**card_data)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching card: {str(e)}")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
