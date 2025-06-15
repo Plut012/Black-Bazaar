@@ -8,6 +8,8 @@ uvicorn[standard]==0.24.0
 # Database and vector store
 qdrant-client==1.6.9
 sentence-transformers==2.2.2
+transformers==4.30.2
+huggingface_hub==0.16.4
 
 # LLM integration
 requests==2.31.0
@@ -26,6 +28,7 @@ gradio==4.7.1
 python-dotenv==1.0.0
 uuid==1.30
 asyncio-mqtt==0.13.0
+tqdm==4.66.1
 
 # Optional: Direct Ollama Python client
 ollama==0.1.7

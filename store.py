@@ -173,6 +173,66 @@ def load_css():
     </style>
     """, unsafe_allow_html=True)
 
+def render_shop_ui(cards: List[Dict], on_speak_callback):
+    """Render the AI card trader shop interface"""
+    load_css()  # Assuming this loads your retro CSS
+
+    # Shopkeeper section with bars and image
+    st.markdown('''
+    <div style="background: repeating-linear-gradient(
+            90deg, #333 0, #333 10px, #111 10px, #111 20px
+        );
+        padding: 20px; border: 4px solid #555; border-radius: 10px;
+        text-align: center; margin-bottom: 30px;">
+        
+        <img src="https://via.placeholder.com/200x150.png?text=Shopkeeper" 
+             alt="Shopkeeper" 
+             style="border: 5px solid #222; border-radius: 5px; max-height: 150px;">
+        <div style="margin-top: 10px; font-family: 'Cinzel', serif; font-style: italic; color: #cd853f;">
+            "What do you want, stranger?"
+        </div>
+    </div>
+    ''', unsafe_allow_html=True)
+
+    # Card display area (messy table)
+    st.markdown('''
+    <div style="background: #3e2f1c; 
+                border: 4px solid #8b4513; 
+                padding: 20px; 
+                border-radius: 12px;
+                box-shadow: inset 0 0 20px #000;
+                margin-bottom: 30px;">
+        <div style="text-align: center; font-family: 'Cinzel', serif; font-size: 1.4rem; color: #d4af37; margin-bottom: 20px;">
+            Cards on the Table
+        </div>
+    ''', unsafe_allow_html=True)
+
+    for i, card in enumerate(cards):
+        rotation = (-5 + i * 3) % 10 - 5
+        st.markdown(f'''
+        <div style="display: inline-block; transform: rotate({rotation}deg); margin: 10px;">
+        ''', unsafe_allow_html=True)
+        display_card(card)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # Speak button
+    st.markdown('<div style="text-align: center;">', unsafe_allow_html=True)
+    if st.button("💬 Speak"):
+        on_speak_callback()
+    st.markdown('</div>', unsafe_allow_html=True)
+
+def handle_speak():
+    response = api_request("/speak", method="POST")
+    if response:
+        st.markdown(f'''
+        <div class="shopkeeper-message">{response["message"]}</div>
+        ''', unsafe_allow_html=True)
+
+# cards = api_request("/shop/cards") or []
+# render_shop_ui(cards, handle_speak)
+
 def display_card(card: Dict, key: str = None):
     """Display a card with retro styling"""
     card_html = f"""

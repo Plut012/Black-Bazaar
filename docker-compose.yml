@@ -1,6 +1,5 @@
 version: '3.8'
 
-
 services:
   qdrant:
     image: qdrant/qdrant
@@ -10,6 +9,8 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     restart: unless-stopped
+    networks:
+      - app-network
 
   frontend:
     build:
@@ -18,6 +19,28 @@ services:
     ports:
       - "3000:3000"
     restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - app-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend.dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - OLLAMA_HOST=host.docker.internal
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+    restart: unless-stopped
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
 
 volumes:
   qdrant_data:
