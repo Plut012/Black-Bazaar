@@ -1,5 +1,6 @@
 # Ignore cards directory
 cards/
+cards/mtg.json
 
 # Python
 __pycache__/
