@@ -7,9 +7,7 @@ Retro-styled interface for trading cards with an AI shopkeeper
 import streamlit as st
 import requests
 import json
-import time
 from typing import List, Dict
-import pandas as pd
 
 # Configuration
 API_BASE_URL = "http://localhost:8000"
@@ -91,7 +89,7 @@ def load_css():
         padding-left: 10px;
     }
     
-    .card-value {
+    .card-pt {
         background: #8b4513;
         color: #d4af37;
         padding: 3px 8px;
@@ -99,6 +97,15 @@ def load_css():
         font-size: 0.8rem;
         font-weight: bold;
         float: right;
+        margin-bottom: 8px;
+    }
+    
+    .card-keywords {
+        color: #d4af37;
+        font-size: 0.8rem;
+        font-weight: 600;
+        margin-bottom: 8px;
+        text-transform: uppercase;
     }
     
     .shopkeeper-message {
@@ -173,76 +180,31 @@ def load_css():
     </style>
     """, unsafe_allow_html=True)
 
-def render_shop_ui(cards: List[Dict], on_speak_callback):
-    """Render the AI card trader shop interface"""
-    load_css()  # Assuming this loads your retro CSS
-
-    # Shopkeeper section with bars and image
-    st.markdown('''
-    <div style="background: repeating-linear-gradient(
-            90deg, #333 0, #333 10px, #111 10px, #111 20px
-        );
-        padding: 20px; border: 4px solid #555; border-radius: 10px;
-        text-align: center; margin-bottom: 30px;">
-        
-        <img src="https://via.placeholder.com/200x150.png?text=Shopkeeper" 
-             alt="Shopkeeper" 
-             style="border: 5px solid #222; border-radius: 5px; max-height: 150px;">
-        <div style="margin-top: 10px; font-family: 'Cinzel', serif; font-style: italic; color: #cd853f;">
-            "What do you want, stranger?"
-        </div>
-    </div>
-    ''', unsafe_allow_html=True)
-
-    # Card display area (messy table)
-    st.markdown('''
-    <div style="background: #3e2f1c; 
-                border: 4px solid #8b4513; 
-                padding: 20px; 
-                border-radius: 12px;
-                box-shadow: inset 0 0 20px #000;
-                margin-bottom: 30px;">
-        <div style="text-align: center; font-family: 'Cinzel', serif; font-size: 1.4rem; color: #d4af37; margin-bottom: 20px;">
-            Cards on the Table
-        </div>
-    ''', unsafe_allow_html=True)
-
-    for i, card in enumerate(cards):
-        rotation = (-5 + i * 3) % 10 - 5
-        st.markdown(f'''
-        <div style="display: inline-block; transform: rotate({rotation}deg); margin: 10px;">
-        ''', unsafe_allow_html=True)
-        display_card(card)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # Speak button
-    st.markdown('<div style="text-align: center;">', unsafe_allow_html=True)
-    if st.button("💬 Speak"):
-        on_speak_callback()
-    st.markdown('</div>', unsafe_allow_html=True)
-
-def handle_speak():
-    response = api_request("/speak", method="POST")
-    if response:
-        st.markdown(f'''
-        <div class="shopkeeper-message">{response["message"]}</div>
-        ''', unsafe_allow_html=True)
-
-# cards = api_request("/shop/cards") or []
-# render_shop_ui(cards, handle_speak)
-
 def display_card(card: Dict, key: str = None):
-    """Display a card with retro styling"""
+    """Display a card with retro styling, showing only essential gameplay information"""
+    # Extract essential card information
+    name = card.get('name', 'Unknown Card')
+    mana_cost = card.get('manaCost', '{0}')
+    type_line = card.get('type', 'Unknown Type')
+    power = card.get('power', '')
+    toughness = card.get('toughness', '')
+    oracle_text = card.get('text', 'No text available.')
+    keywords = card.get('keywords', [])
+    
+    # Format power/toughness if present
+    pt_text = f"{power}/{toughness}" if power and toughness else ""
+    
+    # Format keywords
+    keywords_text = " • ".join(keywords) if keywords else ""
+    
     card_html = f"""
     <div class="card-container">
-        <div class="card-name">{card.get('name', 'Unknown Card')}</div>
-        <div class="card-type">{card.get('type_line', 'Unknown Type')}</div>
-        <div class="card-cost">{card.get('mana_cost', '{0}')}</div>
-        <div class="card-value">Value: {card.get('trade_value', 0)}</div>
-        <div class="card-text">{card.get('oracle_text', 'No text available.')}</div>
-        {f'<div style="font-style: italic; color: #cd853f; font-size: 0.8rem;">"{card.get("flavor_text", "")}"</div>' if card.get('flavor_text') else ''}
+        <div class="card-name">{name}</div>
+        <div class="card-cost">{mana_cost}</div>
+        <div class="card-type">{type_line}</div>
+        {f'<div class="card-pt">{pt_text}</div>' if pt_text else ''}
+        {f'<div class="card-keywords">{keywords_text}</div>' if keywords_text else ''}
+        <div class="card-text">{oracle_text}</div>
     </div>
     """
     st.markdown(card_html, unsafe_allow_html=True)
@@ -267,6 +229,14 @@ def api_request(endpoint: str, method: str = "GET", data: Dict = None):
     except Exception as e:
         st.error(f"Error: {str(e)}")
         return None
+
+def handle_speak():
+    """Handle speaking with the shopkeeper"""
+    response = api_request("/speak", method="POST")
+    if response:
+        st.markdown(f'''
+        <div class="shopkeeper-message">{response["message"]}</div>
+        ''', unsafe_allow_html=True)
 
 def main():
     # Set page config
@@ -374,6 +344,33 @@ def main():
     with col2:
         st.markdown('<div class="section-header">💬 Chat with Grimjaw</div>', unsafe_allow_html=True)
         
+        # Shopkeeper section with bars and image
+        st.markdown('''
+        <div style="background: repeating-linear-gradient(
+                90deg, #333 0, #333 10px, #111 10px, #111 20px
+            );
+            padding: 20px; border: 4px solid #555; border-radius: 10px;
+            text-align: center; margin-bottom: 30px;">
+            
+            <img src="https://via.placeholder.com/200x150.png?text=Shopkeeper" 
+                 alt="Shopkeeper" 
+                 style="border: 5px solid #222; border-radius: 5px; max-height: 150px;">
+            <div style="margin-top: 10px; font-family: 'Cinzel', serif; font-style: italic; color: #cd853f;">
+                "What do you want, stranger?"
+            </div>
+        </div>
+        ''', unsafe_allow_html=True)
+        
         # Chat history
-        chat_container = st.container()
-        with chat_container:
+        for message in st.session_state.chat_history:
+            if message.get('role') == 'shopkeeper':
+                st.markdown(f'<div class="shopkeeper-message">{message["content"]}</div>', unsafe_allow_html=True)
+            else:
+                st.markdown(f'<div class="user-message">{message["content"]}</div>', unsafe_allow_html=True)
+        
+        # Speak button
+        if st.button("💬 Speak with Grimjaw"):
+            handle_speak()
+
+if __name__ == "__main__":
+    main()
