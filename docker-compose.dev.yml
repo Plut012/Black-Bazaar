@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  qdrant:
+    image: qdrant/qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # Just run the database for now
+  # You can run backend/frontend locally to avoid heavy ML downloads
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  qdrant_data:

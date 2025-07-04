@@ -209,39 +209,58 @@ def display_card(card: Dict, key: str = None):
     """
     st.markdown(card_html, unsafe_allow_html=True)
 
-def api_request(endpoint: str, method: str = "GET", data: Dict = None):
+def api_request(endpoint: str, method: str = "GET", data: Dict = None, show_errors: bool = True):
     """Make API request to backend"""
     try:
         url = f"{API_BASE_URL}{endpoint}"
         if method == "GET":
-            response = requests.get(url)
+            response = requests.get(url, timeout=10)
         elif method == "POST":
-            response = requests.post(url, json=data)
+            response = requests.post(url, json=data, timeout=10)
+        elif method == "DELETE":
+            response = requests.delete(url, timeout=10)
         
         if response.status_code == 200:
             return response.json()
         else:
-            st.error(f"API Error: {response.status_code}")
+            if show_errors:
+                st.error(f"API Error: {response.status_code}")
             return None
     except requests.exceptions.ConnectionError:
-        st.error("⚠️ Cannot connect to backend API. Make sure the FastAPI server is running on localhost:8000")
+        if show_errors:
+            st.error("⚠️ Cannot connect to backend API. Make sure the FastAPI server is running on localhost:8000")
+        return None
+    except requests.exceptions.Timeout:
+        if show_errors:
+            st.error("⏱️ Request timed out. Please try again.")
         return None
     except Exception as e:
-        st.error(f"Error: {str(e)}")
+        if show_errors:
+            st.error(f"Error: {str(e)}")
         return None
 
-def handle_speak():
+def handle_speak(message, builder_id=None):
     """Handle speaking with the shopkeeper"""
-    response = api_request("/speak", method="POST")
+    data = {"message": message}
+    if builder_id:
+        data["builder"] = builder_id
+    
+    response = api_request("/speak", method="POST", data=data)
     if response:
-        st.markdown(f'''
-        <div class="shopkeeper-message">{response["message"]}</div>
-        ''', unsafe_allow_html=True)
+        return response
+    return None
+
+def load_builders():
+    """Load available builders from the API"""
+    response = api_request("/api/builders")
+    if response:
+        return response.get("builders", [])
+    return []
 
 def main():
     # Set page config
     st.set_page_config(
-        page_title="Grimjaw's Card Emporium",
+        page_title="Black-Bazaar Card Emporium",
         page_icon="🃏",
         layout="wide",
         initial_sidebar_state="expanded"
@@ -251,8 +270,8 @@ def main():
     load_css()
     
     # Header
-    st.markdown('<div class="main-header">🃏 Grimjaw\'s Card Emporium</div>', unsafe_allow_html=True)
-    st.markdown('<div class="subtitle">"Ancient Cards, Eternal Value"</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">🃏 Black-Bazaar Card Emporium</div>', unsafe_allow_html=True)
+    st.markdown('<div class="subtitle">"Where Power Meets Its Price"</div>', unsafe_allow_html=True)
     
     # Initialize session state
     if 'chat_history' not in st.session_state:
@@ -261,6 +280,12 @@ def main():
         st.session_state.selected_cards = []
     if 'current_inventory' not in st.session_state:
         st.session_state.current_inventory = []
+    if 'selected_builder' not in st.session_state:
+        st.session_state.selected_builder = None
+    if 'builders' not in st.session_state:
+        st.session_state.builders = []
+    if 'user_message' not in st.session_state:
+        st.session_state.user_message = ""
     
     # Sidebar
     with st.sidebar:
@@ -274,6 +299,48 @@ def main():
                     st.rerun()
         else:
             st.write("*No cards selected*")
+        
+        st.markdown("---")
+        
+        # Builder selection
+        st.markdown('<div class="section-header">🔮 Choose Your Builder</div>', unsafe_allow_html=True)
+        
+        # Load builders if not already loaded
+        if not st.session_state.builders:
+            st.session_state.builders = load_builders()
+        
+        if st.session_state.builders:
+            builder_options = {"None": None}
+            for builder in st.session_state.builders:
+                builder_options[f"{builder['name']} - {builder['specialty']}"] = builder['id']
+            
+            selected_builder_key = st.selectbox(
+                "Select a builder to speak with:",
+                options=list(builder_options.keys()),
+                key="builder_selectbox"
+            )
+            
+            st.session_state.selected_builder = builder_options[selected_builder_key]
+            
+            if st.session_state.selected_builder:
+                # Show selected builder info
+                selected_builder_info = next(
+                    (b for b in st.session_state.builders if b['id'] == st.session_state.selected_builder),
+                    None
+                )
+                if selected_builder_info:
+                    st.markdown(f"""<div style="
+                        background: rgba(212, 175, 55, 0.1); 
+                        border: 1px solid #d4af37; 
+                        border-radius: 8px; 
+                        padding: 10px; 
+                        margin: 10px 0;
+                        font-size: 0.9rem;
+                        color: #e8dcc6;">
+                        <strong>{selected_builder_info['name']}</strong><br>
+                        <em>{selected_builder_info['description']}</em><br>
+                        <small>📍 {selected_builder_info['location']}</small>
+                    </div>""", unsafe_allow_html=True)
         
         st.markdown("---")
         
@@ -305,24 +372,37 @@ def main():
         
         with col_search:
             if st.button("Search Cards") and search_query:
-                with st.spinner("Searching cards..."):
+                with st.spinner("🔍 Searching cards..."):
                     result = api_request("/api/cards/search", "POST", {"query": search_query, "limit": 10})
                     if result:
                         st.session_state.current_inventory = result.get('cards', [])
+                        if result.get('cards'):
+                            st.success(f"Found {len(result['cards'])} cards matching '{search_query}'")
+                        else:
+                            st.warning(f"No cards found matching '{search_query}'")
+                    else:
+                        st.session_state.current_inventory = []
         
         with col_random:
             if st.button("Show Random Cards"):
-                with st.spinner("Loading random cards..."):
+                with st.spinner("🎲 Loading random cards..."):
                     result = api_request("/api/cards/random/8")
                     if result:
                         st.session_state.current_inventory = result.get('cards', [])
+                        if result.get('cards'):
+                            st.success(f"Loaded {len(result['cards'])} random cards")
+                        else:
+                            st.warning("No cards available in database")
+                    else:
+                        st.session_state.current_inventory = []
         
         # Display cards
         if not st.session_state.current_inventory:
             # Load initial inventory
-            result = api_request("/api/cards/random/6")
-            if result:
-                st.session_state.current_inventory = result.get('cards', [])
+            with st.spinner("🏪 Loading initial inventory..."):
+                result = api_request("/api/cards/random/6", show_errors=False)
+                if result:
+                    st.session_state.current_inventory = result.get('cards', [])
         
         if st.session_state.current_inventory:
             # Display cards in grid
@@ -342,35 +422,108 @@ def main():
             st.warning("No cards available. Check if the backend API is running.")
     
     with col2:
-        st.markdown('<div class="section-header">💬 Chat with Grimjaw</div>', unsafe_allow_html=True)
+        # Dynamic header based on selected builder
+        if st.session_state.selected_builder:
+            builder_info = next(
+                (b for b in st.session_state.builders if b['id'] == st.session_state.selected_builder),
+                None
+            )
+            if builder_info:
+                st.markdown(f'<div class="section-header">💬 Chat with {builder_info["name"]}</div>', unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="section-header">💬 Chat with Builder</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="section-header">💬 Select a Builder to Chat</div>', unsafe_allow_html=True)
         
-        # Shopkeeper section with bars and image
-        st.markdown('''
-        <div style="background: repeating-linear-gradient(
-                90deg, #333 0, #333 10px, #111 10px, #111 20px
-            );
-            padding: 20px; border: 4px solid #555; border-radius: 10px;
-            text-align: center; margin-bottom: 30px;">
-            
-            <img src="https://via.placeholder.com/200x150.png?text=Shopkeeper" 
-                 alt="Shopkeeper" 
-                 style="border: 5px solid #222; border-radius: 5px; max-height: 150px;">
-            <div style="margin-top: 10px; font-family: 'Cinzel', serif; font-style: italic; color: #cd853f;">
-                "What do you want, stranger?"
+        # Builder section with dynamic content
+        if st.session_state.selected_builder:
+            builder_info = next(
+                (b for b in st.session_state.builders if b['id'] == st.session_state.selected_builder),
+                None
+            )
+            if builder_info:
+                st.markdown(f'''
+                <div style="background: repeating-linear-gradient(
+                        90deg, #333 0, #333 10px, #111 10px, #111 20px
+                    );
+                    padding: 20px; border: 4px solid #555; border-radius: 10px;
+                    text-align: center; margin-bottom: 30px;">
+                    
+                    <img src="https://via.placeholder.com/200x150.png?text={builder_info['name'].replace(' ', '+')}" 
+                         alt="{builder_info['name']}" 
+                         style="border: 5px solid #222; border-radius: 5px; max-height: 150px;">
+                    <div style="margin-top: 10px; font-family: 'Cinzel', serif; font-style: italic; color: #cd853f;">
+                        "{builder_info['description']}"
+                    </div>
+                    <div style="margin-top: 5px; font-size: 0.8rem; color: #8b4513;">
+                        📍 {builder_info['location']}
+                    </div>
+                </div>
+                ''', unsafe_allow_html=True)
+        else:
+            st.markdown('''
+            <div style="background: repeating-linear-gradient(
+                    90deg, #333 0, #333 10px, #111 10px, #111 20px
+                );
+                padding: 20px; border: 4px solid #555; border-radius: 10px;
+                text-align: center; margin-bottom: 30px;">
+                
+                <img src="https://via.placeholder.com/200x150.png?text=Select+Builder" 
+                     alt="Select Builder" 
+                     style="border: 5px solid #222; border-radius: 5px; max-height: 150px;">
+                <div style="margin-top: 10px; font-family: 'Cinzel', serif; font-style: italic; color: #cd853f;">
+                    "Choose a builder from the sidebar to begin..."
+                </div>
             </div>
-        </div>
-        ''', unsafe_allow_html=True)
+            ''', unsafe_allow_html=True)
         
         # Chat history
         for message in st.session_state.chat_history:
-            if message.get('role') == 'shopkeeper':
-                st.markdown(f'<div class="shopkeeper-message">{message["content"]}</div>', unsafe_allow_html=True)
+            if message.get('role') == 'builder':
+                st.markdown(f'<div class="shopkeeper-message"><strong>{message.get("builder", "Builder")}:</strong><br>{message["content"]}</div>', unsafe_allow_html=True)
             else:
                 st.markdown(f'<div class="user-message">{message["content"]}</div>', unsafe_allow_html=True)
         
-        # Speak button
-        if st.button("💬 Speak with Grimjaw"):
-            handle_speak()
+        # Chat input and send button
+        if st.session_state.selected_builder:
+            user_input = st.text_input("💬 Your message:", placeholder="Type your message here...", key="chat_input")
+            
+            col_send, col_clear = st.columns([3, 1])
+            
+            with col_send:
+                if st.button("Send Message", key="send_btn") and user_input.strip():
+                    # Add user message to history
+                    st.session_state.chat_history.append({
+                        "role": "user",
+                        "content": user_input
+                    })
+                    
+                    # Get AI response
+                    with st.spinner("🤖 Waiting for response..."):
+                        response = handle_speak(user_input, st.session_state.selected_builder)
+                        
+                        if response:
+                            st.session_state.chat_history.append({
+                                "role": "builder",
+                                "content": response["message"],
+                                "builder": response["builder"]
+                            })
+                        else:
+                            st.session_state.chat_history.append({
+                                "role": "builder",
+                                "content": "🔧 I'm having trouble connecting right now. Please try again later.",
+                                "builder": "System"
+                            })
+                    
+                    # Clear input and refresh
+                    st.rerun()
+            
+            with col_clear:
+                if st.button("Clear Chat", key="clear_chat_btn"):
+                    st.session_state.chat_history = []
+                    st.rerun()
+        else:
+            st.info("Please select a builder from the sidebar to start a conversation.")
 
 if __name__ == "__main__":
     main()
