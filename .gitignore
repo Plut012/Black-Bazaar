@@ -25,9 +25,11 @@ wheels/
 *.egg
 
 # Virtual Environment
+.venv/
 venv/
 env/
 ENV/
+.env/
 
 # IDE
 .idea/
@@ -37,6 +39,11 @@ ENV/
 
 # Logs
 *.log
+logs/
+log/
+*.log.*
+*.out
+*.err
 
 # Environment variables
 .env

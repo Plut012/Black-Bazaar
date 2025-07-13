@@ -213,28 +213,41 @@ def api_request(endpoint: str, method: str = "GET", data: Dict = None, show_erro
     """Make API request to backend"""
     try:
         url = f"{API_BASE_URL}{endpoint}"
+        print(f"🌐 Making {method} request to: {url}")
+        print(f"📝 Data: {data}")
+        
         if method == "GET":
-            response = requests.get(url, timeout=10)
+            response = requests.get(url, timeout=30)  # Increased timeout for AI responses
         elif method == "POST":
-            response = requests.post(url, json=data, timeout=10)
+            response = requests.post(url, json=data, timeout=30)  # Increased timeout for AI responses
         elif method == "DELETE":
-            response = requests.delete(url, timeout=10)
+            response = requests.delete(url, timeout=30)
+        
+        print(f"📡 Response status: {response.status_code}")
+        print(f"📄 Response content length: {len(response.text)} chars")
         
         if response.status_code == 200:
-            return response.json()
+            result = response.json()
+            print(f"✅ Successfully parsed JSON response")
+            return result
         else:
+            print(f"❌ Non-200 status code: {response.status_code}")
+            print(f"📄 Response text: {response.text[:200]}...")
             if show_errors:
-                st.error(f"API Error: {response.status_code}")
+                st.error(f"API Error: {response.status_code} - {response.text[:100]}")
             return None
-    except requests.exceptions.ConnectionError:
+    except requests.exceptions.ConnectionError as e:
+        print(f"🔌 Connection error: {e}")
         if show_errors:
             st.error("⚠️ Cannot connect to backend API. Make sure the FastAPI server is running on localhost:8000")
         return None
-    except requests.exceptions.Timeout:
+    except requests.exceptions.Timeout as e:
+        print(f"⏱️ Timeout error: {e}")
         if show_errors:
             st.error("⏱️ Request timed out. Please try again.")
         return None
     except Exception as e:
+        print(f"💥 Unexpected error: {type(e).__name__}: {e}")
         if show_errors:
             st.error(f"Error: {str(e)}")
         return None

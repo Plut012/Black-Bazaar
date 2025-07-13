@@ -15,8 +15,15 @@ import asyncio
 # Load environment variables
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging for console output
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),  # This ensures logs go to console
+        logging.FileHandler('app.log')  # Also log to file
+    ]
+)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="AI Card Trader API")
@@ -68,10 +75,15 @@ async def startup_event():
         embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
         logger.info("Loaded embedding model")
         
-        # Initialize Ollama client
+        # Initialize Ollama client with better connection handling
         ollama_host = os.getenv("OLLAMA_HOST", "localhost")
         ollama_port = os.getenv("OLLAMA_PORT", "11434")
-        ollama_client = httpx.AsyncClient(base_url=f"http://{ollama_host}:{ollama_port}")
+        ollama_client = httpx.AsyncClient(
+            base_url=f"http://{ollama_host}:{ollama_port}",
+            timeout=60.0,  # Increased timeout for Ollama responses
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+            headers={"Connection": "keep-alive"}
+        )
         logger.info(f"Connected to Ollama at {ollama_host}:{ollama_port}")
         
     except Exception as e:
@@ -230,7 +242,10 @@ async def speak_with_builder(request: SpeakRequest):
     """Speak with a builder character"""
     global ollama_client
     
+    print(f"🔥 SPEAK ENDPOINT CALLED: {request.message[:50]}...")
+    
     if not ollama_client:
+        print("❌ NO OLLAMA CLIENT AVAILABLE")
         raise HTTPException(status_code=503, detail="AI service not available")
     
     # Default to grimwick if no builder specified
@@ -264,12 +279,13 @@ async def speak_with_builder(request: SpeakRequest):
         raise HTTPException(status_code=400, detail="Unknown builder")
     
     try:
+        print(f"✅ PROCESSING REQUEST FOR BUILDER: {builder_id}")
         # Get the character prompt
         system_prompt = builder_prompts[builder_id]
         
         # Create the chat completion request
         chat_request = {
-            "model": "llama3.1",  # Default model, can be configurable
+            "model": "gurubot/llama3-alpha-centauri-uncensored:latest",  # Use available model
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": request.message}
@@ -277,19 +293,24 @@ async def speak_with_builder(request: SpeakRequest):
             "stream": False
         }
         
-        # Call Ollama API
+        print(f"📤 SENDING TO OLLAMA: {chat_request['model']}")
+        # Call Ollama API - simplified without retry for now
+        print(f"🔄 SENDING REQUEST TO OLLAMA...")
         response = await ollama_client.post("/api/chat", json=chat_request)
+        print(f"📥 GOT RESPONSE, STATUS: {response.status_code}")
         
         if response.status_code != 200:
+            print(f"❌ BAD STATUS CODE: {response.status_code}")
             raise HTTPException(status_code=503, detail="AI service error")
         
         result = response.json()
         ai_response = result.get("message", {}).get("content", "I cannot respond right now.")
+        print(f"✅ SUCCESS: Got {len(ai_response)} characters")
         
         return SpeakResponse(message=ai_response, builder=builder_names[builder_id])
         
     except Exception as e:
-        logger.error(f"Chat error: {e}")
+        print(f"💥 EXCEPTION CAUGHT: {type(e).__name__}: {str(e)}")
         # Return a fallback response instead of crashing
         fallback_responses = {
             "grimwick": "*grumbles and waves dismissively* Can't talk right now, kid. Come back later.",
